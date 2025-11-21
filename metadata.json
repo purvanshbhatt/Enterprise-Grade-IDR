@@ -1,0 +1,5 @@
+{
+  "name": "Sentinel AI - Enterprise IDR",
+  "description": "A consumer-grade, enterprise-ready IDR and Virus Scanning platform powered by Gemini 3 Pro and Flash. Features deep analysis, vulnerability search, and real-time threat detection.",
+  "requestFramePermissions": []
+}
