@@ -1,5 +1,7 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import { ScanResult, ThreatLevel, ScanOptions } from "../types";
+import { computeFileHash, readFileHead, bufferToHex, bufferToAscii } from "./cryptoService";
 
 const getAiClient = () => {
   const apiKey = process.env.API_KEY;
@@ -34,10 +36,22 @@ const fileToText = (file: File): Promise<string> => {
 
 export const analyzeFile = async (file: File, options: ScanOptions): Promise<ScanResult> => {
   const ai = getAiClient();
-  const isImage = file.type.startsWith('image/');
+  // Fix: Exclude SVG/XML from image processing as Gemini Vision doesn't support it directly. Treat as text/code.
+  const isImage = file.type.startsWith('image/') && !file.type.includes('svg') && !file.type.includes('xml');
   
-  // We select models based on the task complexity and user options
+  // 1. Pre-computation: Hashing and Metadata
+  const fileHash = await computeFileHash(file);
+  const headBuffer = await readFileHead(file, 1024); // Read first 1KB
+  const hexDump = bufferToHex(headBuffer);
+  const asciiDump = bufferToAscii(headBuffer);
   
+  const metadata = {
+    size: file.size,
+    type: file.type || 'application/octet-stream',
+    lastModified: file.lastModified,
+    magicBytes: hexDump.substring(0, 24) // First 8 bytes roughly
+  };
+
   try {
     let promptParts: any[] = [];
     
@@ -73,7 +87,7 @@ export const analyzeFile = async (file: File, options: ScanOptions): Promise<Sca
       required: ["threatLevel", "summary", "vulnerabilities", "confidenceScore", "technicalDetails"]
     };
 
-    // 1. Construct Prompt
+    // 2. Construct Prompt
     if (isImage) {
       const base64Data = await fileToBase64(file);
       promptParts = [
@@ -85,6 +99,9 @@ export const analyzeFile = async (file: File, options: ScanOptions): Promise<Sca
         },
         {
           text: `Analyze this image for security threats. 
+                 File Hash (SHA-256): ${fileHash}
+                 Metadata: ${JSON.stringify(metadata)}
+                 
                  ${depthContext}
                  ${sensitivityContext}
                  Check for steganography indicators (visual noise), embedded malicious text codes (OCR), or if it's a screenshot of vulnerable code/systems.
@@ -93,72 +110,99 @@ export const analyzeFile = async (file: File, options: ScanOptions): Promise<Sca
         }
       ];
     } else {
-      // Assume text/code for non-images for this demo
-      const textContent = await fileToText(file);
+      // Text/Binary Analysis
+      // We pass the Hex and ASCII preview to help detecting binary exploits or hidden strings in non-text files
+      
+      let contentSample = "";
+      
+      // Check for text-based formats including source code, configuration, and SVGs
+      const isTextBased = file.type.includes('text') || 
+                          file.type.includes('javascript') || 
+                          file.type.includes('json') || 
+                          file.type.includes('xml') ||
+                          file.type.includes('svg') ||
+                          file.name.match(/\.(py|js|ts|tsx|jsx|cpp|h|c|java|txt|md|html|css|svg|xml|json|yaml|yml|sh|bat|ps1)$/i);
+
+      // If it's a large file or binary, we rely heavily on the hex dump and a text sample
+      if (file.size < 100000 && isTextBased) {
+          contentSample = await fileToText(file);
+      } else {
+          contentSample = "[Binary or Large File - Content Omitted, relying on Hex/ASCII dump]";
+      }
+
       promptParts = [
         {
-          text: `Analyze the following file content for security vulnerabilities, viruses, malicious patterns, logic bombs, or known CVEs.
-                 File Name: ${file.name}
+          text: `Analyze the following file for security vulnerabilities, viruses, malicious patterns, logic bombs, or known CVEs.
+                 
+                 FILE METADATA:
+                 Name: ${file.name}
+                 Size: ${file.size} bytes
+                 Type: ${file.type}
+                 SHA-256 Hash: ${fileHash}
+                 
+                 BINARY INSPECTION (First 1KB):
+                 Hex Dump: ${hexDump.substring(0, 500)}...
+                 ASCII Preview: ${asciiDump.substring(0, 500)}...
                  
                  CONFIGURATION:
                  ${depthContext}
                  ${sensitivityContext}
                  ${analysisFocus}
                  
-                 CONTENT START:
-                 ${textContent.substring(0, 20000)} 
-                 CONTENT END
+                 CONTENT SAMPLE (Text-based only):
+                 ${contentSample.substring(0, 15000)} 
                  
-                 Act as a senior security researcher.`
+                 INSTRUCTIONS:
+                 1. Analyze the Hex/ASCII header to confirm file type consistency (Magic Bytes).
+                 2. Look for hidden strings, shellcode patterns, or suspicious import tables in the ASCII dump.
+                 3. Analyze the text content (if provided) for code vulnerabilities (XSS in SVG, Injection in SQL/Code, Macros, etc).
+                 4. Act as a senior security researcher.
+                 `
         }
       ];
     }
 
-    // 2. Execute Analysis
+    // 3. Execute Analysis
     
     // Determine budget based on depth
     let budget = 1024;
     if (options.scanDepth === 'deep') budget = 32768; // Max budget for Gemini 3 Pro
     if (options.scanDepth === 'quick') budget = 0; // No thinking for quick scans
     
-    if (!isImage) {
-      // DEEP ANALYSIS WITH THINKING
-      const analysisResponse = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: { parts: promptParts },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: responseSchema,
-          thinkingConfig: { thinkingBudget: budget }, 
-        }
-      });
+    // Use Gemini 3 Pro for analysis
+    const analysisResponse = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: { parts: promptParts },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: responseSchema,
+        thinkingConfig: { thinkingBudget: budget }, 
+      }
+    });
 
-      const result = JSON.parse(analysisResponse.text || "{}");
-      return { ...result, fileName: file.name };
-
-    } else {
-      // IMAGE ANALYSIS
-      const analysisResponse = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: { parts: promptParts },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: responseSchema,
-        }
-      });
-       const result = JSON.parse(analysisResponse.text || "{}");
-       return { ...result, fileName: file.name };
-    }
+    const result = JSON.parse(analysisResponse.text || "{}");
+    
+    // Return enriched result
+    return { 
+      ...result, 
+      fileName: file.name,
+      fileHash,
+      metadata,
+      hexDump,
+      asciiDump
+    };
 
   } catch (error) {
     console.error("Analysis failed:", error);
     return {
       fileName: file.name,
+      fileHash,
+      metadata,
       threatLevel: ThreatLevel.UNKNOWN,
       summary: "Analysis failed due to processing error.",
       vulnerabilities: [],
       confidenceScore: 0,
-      technicalDetails: "Error communicating with AI engine.",
+      technicalDetails: `Error communicating with AI engine or processing file: ${error instanceof Error ? error.message : 'Unknown error'}`,
       cveMatches: []
     };
   }

@@ -1,3 +1,4 @@
+
 export enum ScanStatus {
   IDLE = 'IDLE',
   SCANNING = 'SCANNING',
@@ -13,14 +14,25 @@ export enum ThreatLevel {
   UNKNOWN = 'UNKNOWN'
 }
 
+export interface FileMetadata {
+  size: number;
+  type: string;
+  lastModified: number;
+  magicBytes?: string; // First few hex bytes
+}
+
 export interface ScanResult {
   fileName: string;
+  fileHash: string; // SHA-256
+  metadata: FileMetadata;
   threatLevel: ThreatLevel;
   summary: string;
   vulnerabilities: string[];
   cveMatches?: string[]; // From Search Grounding
   confidenceScore: number; // 0-100
   technicalDetails: string;
+  hexDump?: string;
+  asciiDump?: string;
 }
 
 export interface FileQueueItem {

@@ -1,5 +1,6 @@
+
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Upload, FileCode, FileImage, CheckCircle, AlertTriangle, XCircle, Loader2, Search, Globe, Mail, Clock, Bell, Sliders, ChevronDown, ChevronUp, Zap, Shield, Eye } from 'lucide-react';
+import { Upload, FileCode, FileImage, CheckCircle, AlertTriangle, XCircle, Loader2, Search, Globe, Mail, Clock, Bell, Sliders, ChevronDown, ChevronUp, Zap, Shield, Eye, FileArchive, FileText, FileCog, File, Binary, Hash, Lock } from 'lucide-react';
 import { FileQueueItem, ScanStatus, ThreatLevel, ScanResult, ScanOptions } from '../types';
 import { analyzeFile, checkKnownVulnerabilities } from '../services/geminiService';
 
@@ -160,6 +161,19 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
     }
   };
 
+  const getFileIcon = (file: File) => {
+    const name = file.name.toLowerCase();
+    const type = file.type.toLowerCase();
+
+    if (type.startsWith('image')) return <FileImage size={20} />;
+    if (name.endsWith('.zip') || name.endsWith('.rar') || name.endsWith('.7z') || name.endsWith('.tar') || name.endsWith('.gz')) return <FileArchive size={20} />;
+    if (name.endsWith('.pdf') || name.endsWith('.doc') || name.endsWith('.docx') || name.endsWith('.txt') || name.endsWith('.md')) return <FileText size={20} />;
+    if (name.endsWith('.exe') || name.endsWith('.msi') || name.endsWith('.bat') || name.endsWith('.sh') || name.endsWith('.bin')) return <FileCog size={20} />;
+    if (name.endsWith('.js') || name.endsWith('.ts') || name.endsWith('.py') || name.endsWith('.cpp') || name.endsWith('.html') || name.endsWith('.css')) return <FileCode size={20} />;
+    
+    return <File size={20} />;
+  }
+
   return (
     <div className="h-full flex flex-col p-6 space-y-6 overflow-hidden relative">
       
@@ -179,7 +193,14 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
         <div className="flex justify-between items-end">
           <div>
             <h2 className="text-2xl font-bold text-white mb-1">Deep Scan Engine</h2>
-            <p className="text-slate-400 font-mono text-sm">Powered by Gemini 3 Pro + Turn OS Intelligence</p>
+            <div className="flex items-center gap-2 text-slate-400 font-mono text-sm">
+              <span>Powered by Gemini 3 Pro</span>
+              <span className="text-slate-700">|</span>
+              <div className="flex items-center gap-1 text-emerald-500">
+                <Lock size={12} />
+                <span className="text-xs uppercase">Vault Storage Active</span>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             {/* Email Toggle */}
@@ -329,7 +350,7 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
       </div>
 
       {/* Queue / List */}
-      <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+      <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar">
         {queue.length === 0 && (
           <div className="text-center text-slate-600 py-12 font-mono text-sm">
             Awaiting input stream...
@@ -340,13 +361,18 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
           <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-lg p-4 transition-all hover:border-slate-700 group">
             <div className="flex items-center gap-4">
               {/* Icon */}
-              <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400">
-                {item.file.type.startsWith('image') ? <FileImage size={20} /> : <FileCode size={20} />}
+              <div className="w-10 h-10 rounded-lg bg-slate-800 flex items-center justify-center text-slate-400 relative">
+                {getFileIcon(item.file)}
+                {item.result && (
+                   <div className="absolute -top-1 -right-1 bg-slate-950 rounded-full p-0.5">
+                     {item.result.threatLevel === ThreatLevel.SAFE ? <CheckCircle size={12} className="text-emerald-500"/> : <AlertTriangle size={12} className="text-red-500"/>}
+                   </div>
+                )}
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1">
                   <h4 className="text-slate-200 font-medium truncate pr-4">{item.file.name}</h4>
                   <div className="flex items-center gap-3">
                     {item.eta !== undefined && item.eta > 0 && item.status !== ScanStatus.COMPLETED && (
@@ -359,17 +385,30 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
                   </div>
                 </div>
                 
-                {/* Status Bar */}
-                <div className="relative w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full transition-all duration-300 ${
-                      item.status === ScanStatus.ERROR ? 'bg-red-500' : 
-                      item.result?.threatLevel === ThreatLevel.MALICIOUS ? 'bg-red-500' :
-                      item.result?.threatLevel === ThreatLevel.SUSPICIOUS ? 'bg-amber-500' :
-                      'bg-cyan-500'
-                    }`} 
-                    style={{ width: `${item.progress}%` }}
-                  />
+                {/* Hash Display if available */}
+                {item.result?.fileHash && (
+                   <div className="flex items-center gap-1.5 text-[10px] text-slate-500 font-mono mb-2">
+                     <Hash size={10} />
+                     <span className="truncate max-w-[200px]">{item.result.fileHash}</span>
+                   </div>
+                )}
+
+                {/* Status Bar & Percentage */}
+                <div className="flex items-center gap-3 mt-2">
+                  <div className="relative flex-1 bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full transition-all duration-300 ${
+                        item.status === ScanStatus.ERROR ? 'bg-red-500' : 
+                        item.result?.threatLevel === ThreatLevel.MALICIOUS ? 'bg-red-500' :
+                        item.result?.threatLevel === ThreatLevel.SUSPICIOUS ? 'bg-amber-500' :
+                        'bg-cyan-500'
+                      }`} 
+                      style={{ width: `${item.progress}%` }}
+                    />
+                  </div>
+                  {(item.status === ScanStatus.SCANNING || item.status === ScanStatus.ANALYZING) && (
+                     <span className="text-xs font-mono text-cyan-400 min-w-[2.5rem] text-right">{Math.round(item.progress)}%</span>
+                  )}
                 </div>
               </div>
 
@@ -404,45 +443,88 @@ const Scanner: React.FC<ScannerProps> = ({ addScanToHistory }) => {
             {/* Results Expand */}
             {item.status === ScanStatus.COMPLETED && item.result && (
               <div className="mt-4 pt-4 border-t border-slate-800 text-sm animate-in fade-in slide-in-from-top-2">
-                <p className="text-slate-400 mb-2"><span className="text-slate-200 font-semibold">Summary:</span> {item.result.summary}</p>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                  <div className="bg-slate-950/50 p-3 rounded border border-slate-800">
-                    <h5 className="text-xs font-mono text-slate-500 uppercase mb-2">Vulnerabilities</h5>
-                    {item.result.vulnerabilities.length > 0 ? (
-                      <ul className="space-y-1">
-                        {item.result.vulnerabilities.map((v, i) => (
-                          <li key={i} className="text-red-400 flex items-start gap-2">
-                            <span className="mt-1.5 w-1 h-1 bg-red-500 rounded-full"></span>
-                            {v}
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <span className="text-emerald-500 flex items-center gap-1"><CheckCircle size={12}/> None Detected</span>
-                    )}
-                  </div>
-
-                  <div className="bg-slate-950/50 p-3 rounded border border-slate-800">
-                    <h5 className="text-xs font-mono text-slate-500 uppercase mb-2">Turn OS Intelligence</h5>
-                    {item.result.cveMatches && item.result.cveMatches.length > 0 ? (
-                       <ul className="space-y-1">
-                       {item.result.cveMatches.map((link, i) => (
-                         <li key={i} className="text-cyan-400 flex items-center gap-2 truncate">
-                           <Globe size={12} />
-                           <a href={link} target="_blank" rel="noreferrer" className="hover:underline truncate block w-full">{link}</a>
-                         </li>
-                       ))}
-                     </ul>
-                    ) : (
-                      <span className="text-slate-500 text-xs italic">No public CVE matches found.</span>
-                    )}
-                  </div>
+                {/* Results Header */}
+                <div className="flex items-center justify-between mb-4">
+                   <p className="text-slate-400"><span className="text-slate-200 font-semibold">Verdict:</span> {item.result.summary}</p>
+                   <span className="text-[10px] font-mono bg-slate-800 px-2 py-1 rounded text-slate-400">CONFIDENCE: {item.result.confidenceScore}%</span>
                 </div>
+                
+                {/* Result Tabs/Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  
+                  {/* Left: Vulnerabilities */}
+                  <div className="space-y-4">
+                    <div className="bg-slate-950/50 p-3 rounded border border-slate-800">
+                      <h5 className="text-xs font-mono text-slate-500 uppercase mb-2">Vulnerabilities</h5>
+                      {item.result.vulnerabilities.length > 0 ? (
+                        <ul className="space-y-1">
+                          {item.result.vulnerabilities.map((v, i) => (
+                            <li key={i} className="text-red-400 flex items-start gap-2">
+                              <span className="mt-1.5 w-1 h-1 bg-red-500 rounded-full shrink-0"></span>
+                              <span className="break-all">{v}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-emerald-500 flex items-center gap-1"><CheckCircle size={12}/> None Detected</span>
+                      )}
+                    </div>
 
-                 <div className="mt-3 bg-slate-950 p-3 rounded border border-slate-800 font-mono text-xs text-slate-400 overflow-x-auto whitespace-pre-wrap max-h-40 overflow-y-auto">
-                    {item.result.technicalDetails}
-                 </div>
+                    <div className="bg-slate-950/50 p-3 rounded border border-slate-800">
+                      <h5 className="text-xs font-mono text-slate-500 uppercase mb-2">Turn OS Intelligence (CVE Matches)</h5>
+                      {item.result.cveMatches && item.result.cveMatches.length > 0 ? (
+                         <ul className="space-y-1">
+                         {item.result.cveMatches.map((link, i) => (
+                           <li key={i} className="text-cyan-400 flex items-center gap-2 truncate">
+                             <Globe size={12} />
+                             <a href={link} target="_blank" rel="noreferrer" className="hover:underline truncate block w-full">{link}</a>
+                           </li>
+                         ))}
+                       </ul>
+                      ) : (
+                        <span className="text-slate-500 text-xs italic">No public CVE matches found.</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right: Binary Inspector & Tech Details */}
+                  <div className="space-y-4">
+                     {/* Binary Inspector */}
+                     <div className="bg-slate-950 p-0 rounded border border-slate-800 overflow-hidden flex flex-col">
+                        <div className="bg-slate-900 px-3 py-2 border-b border-slate-800 flex items-center gap-2">
+                           <Binary size={12} className="text-slate-400" />
+                           <h5 className="text-xs font-mono text-slate-400 uppercase">Binary Inspector (Header 1KB)</h5>
+                        </div>
+                        <div className="grid grid-cols-2 divide-x divide-slate-800">
+                           <div className="flex flex-col">
+                              <div className="bg-slate-900/50 px-3 py-1.5 border-b border-slate-800 text-[10px] font-mono text-slate-500 uppercase tracking-wider">Hexadecimal</div>
+                              <div className="h-48 overflow-y-auto custom-scrollbar bg-slate-950/30 p-3">
+                                <pre className="text-[10px] font-mono text-cyan-300/70 whitespace-pre-wrap break-all leading-relaxed select-all">
+                                   {item.result.hexDump || "No binary data available"}
+                                </pre>
+                              </div>
+                           </div>
+                           <div className="flex flex-col">
+                              <div className="bg-slate-900/50 px-3 py-1.5 border-b border-slate-800 text-[10px] font-mono text-slate-500 uppercase tracking-wider">ASCII</div>
+                              <div className="h-48 overflow-y-auto custom-scrollbar bg-slate-950/30 p-3">
+                                <pre className="text-[10px] font-mono text-emerald-300/70 whitespace-pre-wrap break-all leading-relaxed select-all">
+                                   {item.result.asciiDump || "No ASCII data available"}
+                                </pre>
+                              </div>
+                           </div>
+                        </div>
+                     </div>
+
+                     <div className="bg-slate-950 p-3 rounded border border-slate-800">
+                       <h5 className="text-xs font-mono text-slate-500 uppercase mb-2">Technical Analysis</h5>
+                       <div className="font-mono text-xs text-slate-400 whitespace-pre-wrap max-h-32 overflow-y-auto custom-scrollbar">
+                          {item.result.technicalDetails}
+                       </div>
+                     </div>
+                  </div>
+
+                </div>
               </div>
             )}
           </div>

@@ -1,27 +1,53 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
 import Scanner from './components/Scanner';
-import { ViewState, ScanResult } from './types';
+import { ViewState, ScanResult, ThreatLevel } from './types';
 import { Search } from 'lucide-react';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.DASHBOARD);
   const [scanHistory, setScanHistory] = useState<ScanResult[]>([]);
+  
+  // Real-time System Statistics
+  const [stats, setStats] = useState({
+    scanned: 0,
+    threats: 0,
+    health: 100
+  });
 
   const addScanToHistory = (result: ScanResult) => {
     setScanHistory(prev => [result, ...prev]);
+    
+    setStats(prev => {
+      const newScanned = prev.scanned + 1;
+      const isThreat = result.threatLevel !== ThreatLevel.SAFE;
+      const newThreats = isThreat ? prev.threats + 1 : prev.threats;
+      
+      // Calculate health based on threat ratio
+      // If 0 files, 100%. If threats exist, health drops.
+      // Simple formula: 100 - (threats / scanned * 50) -> Cap at 0.
+      const threatRatio = newThreats / newScanned;
+      const newHealth = Math.max(0, 100 - (threatRatio * 100));
+
+      return {
+        scanned: newScanned,
+        threats: newThreats,
+        health: parseFloat(newHealth.toFixed(1))
+      };
+    });
   };
 
   const renderContent = () => {
     switch (currentView) {
       case ViewState.DASHBOARD:
-        return <Dashboard />;
+        return <Dashboard stats={stats} />;
       case ViewState.SCANNER:
         return <Scanner addScanToHistory={addScanToHistory} />;
       case ViewState.HISTORY:
         return (
-          <div className="p-6">
+          <div className="p-6 animate-in fade-in duration-500">
              <h2 className="text-2xl font-bold text-white mb-6">Scan History</h2>
              <div className="bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
                 <table className="w-full text-sm text-left text-slate-400">
@@ -37,7 +63,7 @@ const App: React.FC = () => {
                     {scanHistory.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">
-                          No history available. Run a scan.
+                          No history available. Run a scan in the Scanner module.
                         </td>
                       </tr>
                     ) : (
